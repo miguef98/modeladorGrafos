@@ -1,0 +1,7 @@
+.vscode
+.pytest_cache
+__pycache__
+.ipynb_checkpoints
+src/__pycache__
+*.obj
+*.csv
