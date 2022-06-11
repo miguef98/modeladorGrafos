@@ -31,23 +31,21 @@ class MeshGrafo:
         self.cuadradoNodo[nodo] = Cuadrado( self.G.posicionNodo(nodo) , normal, upVector )
         return self
     
+    def agregarCuadradoOrientado( self, nodoFrom, nodo, indicesVertices=None ):
+        if indicesVertices is None:
+            return self.agregarCuadradoOrientadoPorNodo(nodoFrom, nodo )
+        else:
+            return self.agregarCuadradoOrientadoPorVertices( nodoFrom, nodo, indicesVertices)
+
     def agregarCuadradoOrientadoPorNodo( self, nodoFrom, nodo ):
         ''' 
             Crea cuadrado de nodo suponiendo que se encuentra en un segmento, realizando
             la cuestion de calcular el plano normal sumando direcciones y proyectando el upVector a partir de un
             nodoFrom anterior en el segmento
-            Se espera -- deg(nodo) = 2 --
         '''
-        if self.G.gradoNodo( nodo ) > 2:
-            raise ValueError("Se espera nodo de grado 2 o 1, y el nodo " + str(nodo) + " es de grado " + str(self.G.gradoNodo(nodo)) )
-
-        elif self.G.gradoNodo( nodo ) == 2:
-            nodoTo = [ vecino for vecino in self.G.vecinos( nodo ) if vecino != nodoFrom ][0]
-            normalNodo = ( self.G.direccion( nodoFrom, nodo ) + self.G.direccion( nodo, nodoTo ) ).normalizar()
-        else:
-            normalNodo = self.G.direccion( nodoFrom, nodo )
-
-        upVectorNodo = self.cuadradoNodo[nodoFrom].upVector.projectToPlane( normalNodo ).normalizar() * (self.G.radioNodo(nodo) * np.sqrt(2))
+        
+        normalNodo = self.calcularNormalNodo( nodoFrom, nodo )
+        upVectorNodo = self.getUpVectorNodo(nodoFrom).projectToPlane( normalNodo ).setSize(self.G.radioNodo(nodo) * np.sqrt(2))
 
         return self.agregarCuadrado( nodo, normalNodo, upVectorNodo )
 
@@ -56,28 +54,34 @@ class MeshGrafo:
             Crea cuadrado de nodo suponiendo que se encuentra en un segmento, realizando
             la cuestion de calcular el plano normal sumando direcciones tomando en cuenta el nodoFrom 
             y proyectando el upVector a partir de un grupo de vertices
-            Se espera -- deg(nodo) = 2 --
         '''
-        if self.G.gradoNodo( nodo ) > 2:
-            raise ValueError("Se espera nodo de grado 2 o 1, y el nodo " + str(nodo) + " es de grado " + str(self.G.gradoNodo(nodo)) )
 
-        elif self.G.gradoNodo( nodo ) == 2:
-            nodoTo = [ vecino for vecino in self.G.vecinos( nodo ) if vecino != nodoFrom ][0]
-            normalNodo = ( self.G.direccion( nodoFrom, nodo ) + self.G.direccion( nodo, nodoTo ) ).normalizar()
-        else:
-            normalNodo = self.G.direccion( nodoFrom, nodo )
-
+        normalNodo = self.calcularNormalNodo( nodoFrom, nodo )
         centroDeMasaVertices = np.sum( [ self.vertice(i) for i in indicesVertices ] ) / 4
         upVectorDeVertices = self.vertice( indicesVertices[0] ) - centroDeMasaVertices
-        upVectorDeNodo = upVectorDeVertices.projectToPlane( normalNodo ).normalizar() * self.G.radioNodo(nodo) * np.sqrt(2)
+        upVectorDeNodo = upVectorDeVertices.projectToPlane( normalNodo ).setSize(self.G.radioNodo(nodo) * np.sqrt(2))
 
         self.agregarCuadrado( nodo, normalNodo, upVectorDeNodo )
+
+    def agregarTapaANodo( self, nodo ):
+        self.caras.append( [ self.indiceVertice(nodo, i) for i in range(4) ] )
 
     def getUpVectorNodo( self, nodo ):
         return self.cuadradoNodo[nodo].upVector
 
     def getNormalNodo( self, nodo ):
         return self.cuadradoNodo[nodo].normal
+    
+    def calcularNormalNodo( self, nodoFrom, nodo ):
+        if self.G.gradoNodo(nodo) == 1:
+            normalNodo = self.G.direccion( nodoFrom, nodo )
+        elif self.G.gradoNodo( nodo ) == 2:
+            nodoTo = [ vecino for vecino in self.G.vecinos( nodo ) if vecino != nodoFrom ][0]
+            normalNodo = ( self.G.direccion( nodoFrom, nodo ) + self.G.direccion( nodo, nodoTo ) ).normalizar()
+        else:
+            normalNodo = self.G.planoPromedioJoint( nodoFrom, nodo )  
+        
+        return normalNodo
 
     def calcularCaraCuadranteEntreNodos( self, nodoFrom, nodoTo, cuadrante ):
         '''
@@ -97,13 +101,13 @@ class MeshGrafo:
             busco las conexiones (vi, wj) tales que la sumatoria de || vi - wj || sea minima para todas las 
             posibles permutaciones de los w. 
             Luego, calculo los indices que pertenecen a cada cara.
-        ''' 
+        '''
         verticesNodo = np.array( [ verticeNodo.toNumpy() for verticeNodo in self.cuadradoNodo[nodo].vertices ] )
         verticesAConectar = np.array( [ self.vertice(i).toNumpy() for i in indicesVertices ] )
 
         permutacionesVertices = [ verticesAConectar[ list(permutacion) ] for permutacion in permutations([0,1,2,3]) ]
         permutacionesIndices = [ np.array( indicesVertices )[ list(permutacion) ] for permutacion in permutations([0,1,2,3]) ]
-        normasDeFrobenius = [ np.linalg.norm( (np.full_like( permutacionesVertices, verticesNodo) - permutacionesVertices)[i] , 'fro') for i in range(len(permutacionesVertices))]
+        normasDeFrobenius = [ np.exp( np.linalg.norm( (np.full_like( permutacionesVertices, verticesNodo) - permutacionesVertices)[i] , 'fro') ) / np.exp( self.G.radioNodo(nodo) * 2) for i in range(len(permutacionesVertices))]
 
         verticesOrdenOptimo = permutacionesIndices[ np.argmin( normasDeFrobenius ) ]
         return [ 
@@ -115,7 +119,7 @@ class MeshGrafo:
 
     def tileTrivially( self, nodoFrom, nodoTo ):
         if not nodoTo in self.cuadradoNodo:
-            self.agregarCuadradoOrientadoPorNodo( nodoFrom, nodoTo )
+            self.agregarCuadradoOrientado( nodoFrom, nodoTo )
 
         # TO DO: else => tengo que ver que hago si ya esta...
         # porque no puedo asumir que tienen el upVector orientado
@@ -128,47 +132,39 @@ class MeshGrafo:
 
     def tileJoint( self, nodoFrom, nodoJoint, nodosTo, indicesVertices, cola ):
         if not nodoJoint in self.cuadradoNodo:
-            if indicesVertices is None:
-                self.agregarCuadradoOrientadoPorNodo( nodoFrom, nodoJoint )
-            else:
-                self.agregarCuadradoOrientadoPorVertices( nodoFrom, nodoJoint, indicesVertices )
+            self.agregarCuadradoOrientado( nodoFrom, nodoJoint, indicesVertices )
 
-        # si tiene 0 o 1 vecinos a conectar => tengo que agregarlo a la cola
-        if len(nodosTo) < 2:            
-            cola.append( nodoJoint )
+        cola = cola.union( set(nodosTo) )
+        if nodoJoint in cola:
+            cola.remove( nodoJoint )
 
         nodosPorCuadrante = [ [], [], [], [] ]
-        [ nodosPorCuadrante[ self.cuadrante( nodoJoint, nodo ) ] for nodo in nodosTo ]
+        [ nodosPorCuadrante[ self.cuadrante( nodoJoint, nodo ) ].append(nodo) for nodo in nodosTo ]
         
         for cuadrante, nodosCuadrante in enumerate(nodosPorCuadrante):
             if len( nodosCuadrante ) == 0:
                 if indicesVertices is None:
                     self.caras.append( self.calcularCaraCuadranteEntreNodos( nodoFrom, nodoJoint, cuadrante ) )
                 else:
-                    self.caras.append( self.calcularCaraCuadranteEntreNodoYVertices( nodoJoint, indicesVertices, cuadrante ) )
+                    self.caras.append( self.calcularCaraCuadranteEntreNodoYVertices( nodoJoint, indicesVertices, cuadrante) )
             else:
-                vecinoMasCercano = self.G.vecinoMasCercano( nodoJoint, nodosCuadrante)
+                vecinoMasCercano = self.G.nodoMasCercano( nodoJoint, nodosCuadrante)
 
                 if indicesVertices is None:
-                    indicesVerticesProximaIt = self.calcularCaraCuadranteEntreNodos( nodoFrom, nodoJoint, cuadrante)
-                    #normal = vecinoMasCercano.direccion(0)
+                    indicesVerticesConexionConMasCercano = self.calcularCaraCuadranteEntreNodos( nodoFrom, nodoJoint, cuadrante)
                 else:
-                    indicesVerticesProximaIt = self.calcularCaraCuadranteEntreNodoYVertices( nodoJoint, indicesVertices, cuadrante )
-                    #normal = vecinoMasCercano.direccion(0) + mesh.vertices[indiceVerticesCuadranteFrom[0]].planoFormado( *np.array(mesh.vertices)[indiceVerticesCuadranteFrom[1:3]] )
+                    indicesVerticesConexionConMasCercano = self.calcularCaraCuadranteEntreNodoYVertices( nodoJoint, indicesVertices, cuadrante)
 
+                if not vecinoMasCercano in self.cuadradoNodo:
+                    self.agregarCuadradoOrientado( nodoJoint, vecinoMasCercano, indicesVerticesConexionConMasCercano )
+                
+                nodosCuadrante.remove( vecinoMasCercano )
+                cola2 = self.tileJoint( nodoJoint, vecinoMasCercano, nodosCuadrante, indicesVerticesConexionConMasCercano, cola)
 
-                # como mi nuevo joint va a pasar a ser el vecinoMasCercano, tengo que asegurarme que su otro 
-                # vecino (se de antemano que vecinoMasCercano es de grado 2) no sea un joint
-                vecinoDelMasCercano = self.G.vecinosDistintos( vecinoMasCercano, [ nodoJoint ] )[0]
-                if self.G.gradoNodo( vecinoDelMasCercano ) > 2:
-                    self.G.generarNodoIntermedio( vecinoMasCercano, vecinoDelMasCercano )
+                [ self.G.setearAristaProcesada( nodoJoint, i ) for i in nodosCuadrante ]
 
-                nodosCuadrante.remove(vecinoMasCercano)
-                self.G.pasarVecinosANodo( nodoJoint, vecinoMasCercano, nodosCuadrante )
-
-                self.tileJoint( nodoJoint, vecinoMasCercano, self.G.vecinosDistintos( vecinoMasCercano, [nodoJoint] ), indicesVerticesProximaIt, cola )
-
-        self.G.setearAristaProcesada( nodoFrom, nodoJoint )        
+        self.G.setearAristaProcesada( nodoFrom, nodoJoint )
+        return cola
 
     def cuadrante( self, nodoFrom, nodoTo ):
         '''
@@ -176,7 +172,7 @@ class MeshGrafo:
         '''
         direccionBifurcacion = self.G.direccion( nodoFrom, nodoTo )
         angulo = self.getUpVectorNodo( nodoFrom ).angleTo( direccionBifurcacion, self.getNormalNodo( nodoFrom ) )
-        return [ np.floor(( 4*angulo / (2*np.pi) )).astype(np.uint8) ]
+        return np.floor(( 4*angulo / (2*np.pi) )).astype(np.uint8)
 
     def vertice( self, indice ):
         '''
@@ -186,11 +182,13 @@ class MeshGrafo:
             y los vertices desde el 1... es decir el nodo 0 tiene los vertices 1,2,3,4 ;
              el nodo 1 los 5,6,7,8 ,etc etc ***
         '''
+        if indice == 0 or indice > len( self.G.nodos() ) * 4:
+            raise ValueError( "Indice fuera de rango. El rango posible es (1, " + str(len(self.G.nodos()) * 4) + ")" )
         return self.cuadradoNodo[ int( (indice - 1) / 4 ) ].vertices[ int( (indice - 1) % 4 ) ]
 
     @staticmethod
     def indiceVertice( nodo, nroVertice ):
-        return ( nodo * 4 ) + ( nroVertice )
+        return ( nodo * 4 ) + ( nroVertice + 1 )
 
     def getVertices( self ):
         return np.array(
@@ -198,5 +196,5 @@ class MeshGrafo:
         )
     
     def getCaras( self ):
-        return np.array( self.caras )
+        return np.array( self.caras ) - np.ones_like( self.caras )
 

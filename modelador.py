@@ -27,56 +27,57 @@ class GrafoCentros:
                 nodoInicial = nodo
                 break
 
-        cola = []
+        cola = set()
         self.procesarTile( nodoInicial, cola )
-    
+
     def procesarTile( self, nodo, cola ):
-
         if self.gradoNodo( nodo ) == 1:
-            vecino = self.iesimoVecino( nodo, 0)
-            if self.aristaFueProcesada(nodo, vecino):
-                return self.finCamino(cola)
-            else:
-                normalCuadrado = self.direccion(nodo, vecino)
-                self.mesh.agregarCuadrado( nodo, normalCuadrado, Vec3.random().projectToPlane(normalCuadrado).normalizar() ) 
-                self.mesh.tileTrivially( nodo, vecino )
-                self.procesarTile( vecino, cola )
+            vecinoAProcesar = self.iesimoVecino(nodo, 0)
+            normalCuadrado = self.direccion(nodo, vecinoAProcesar )
+            self.mesh.agregarCuadrado( nodo, normalCuadrado, Vec3.random().projectToPlane(normalCuadrado).normalizar() )       
+            #self.mesh.agregarCuadrado( nodo, normalCuadrado, Vec3(0.3,0.5,1).projectToPlane(normalCuadrado).normalizar() )       
+            self.mesh.tileTrivially( nodo, vecinoAProcesar )
+            self.procesarTile( vecinoAProcesar, cola )
         
-        elif self.gradoNodo( nodo ) == 2:
-            aristasProcesadas = [ self.aristaFueProcesada(nodo, vecino) for vecino in self.vecinos( nodo ) ]
-            if all( aristasProcesadas ):
-                return self.finCamino(cola)
-            else:
-                vecinoAProcesar = self.iesimoVecino( nodo, 0 if aristasProcesadas[1] else 1 )
-
-                if self.gradoNodo( vecinoAProcesar ) > 2:
-                    self.generarIntermediosAJoint( vecinoAProcesar )
-                    vecinosFwd, vecinosBwd = self.clasificarVecinosFwdBwd( nodo, vecinoAProcesar )
-                    self.mesh.tileJoint( nodo, vecinoAProcesar, vecinosBwd, None, cola )
-                    
-                    if len( vecinosFwd ) > 0:
-                        vecinoFwdMasCercano = self.nodoMasCercano( vecinoAProcesar, vecinosFwd )
-
-                        # como mi nuevo joint va a pasar a ser el vecinoMasCercano, tengo que asegurarme que su otro 
-                        # vecino (se de antemano que vecinoMasCercano es de grado 2) no sea un joint
-                        vecinoDeFwdMasCercano = self.vecinosDistintos( vecinoFwdMasCercano, [ vecinoAProcesar ] )[0]
-                        if self.gradoNodo( vecinoDeFwdMasCercano ) > 2:
-                            self.generarNodoIntermedio( vecinoFwdMasCercano, vecinoDeFwdMasCercano )
-
-                        vecinosFwd.remove( vecinoFwdMasCercano )
-                        self.pasarVecinosANodo( vecinoAProcesar, vecinoFwdMasCercano, vecinosFwd)
-                        self.mesh.tileJoint( vecinoAProcesar, vecinoFwdMasCercano, vecinosFwd, None, cola )
-                else:
+        else:
+            vecinosAProcesar = self.vecinosAProcesar(nodo)
+            cantVecinosAProcesar = len(vecinosAProcesar)
+            if cantVecinosAProcesar == 1:
+                vecinoAProcesar = vecinosAProcesar[0]
+                if self.gradoNodo( vecinoAProcesar ) == 1:
+                    self.mesh.tileTrivially( nodo, vecinoAProcesar )
+                    return self.finCamino( cola )
+                elif self.gradoNodo(vecinoAProcesar) == 2:
                     self.mesh.tileTrivially( nodo, vecinoAProcesar )
                     self.procesarTile( vecinoAProcesar, cola )
-        else:
-            raise Exception( "Nunca deberia pasar esto... " )
+                else:
+                    self.generarIntermediosAJoint( nodo, vecinoAProcesar )
+                    vecinosFwd, vecinosBwd = self.clasificarVecinosFwdBwd( nodo, vecinoAProcesar )
+                    cola = self.mesh.tileJoint( nodo, vecinoAProcesar, vecinosBwd, None, cola )
+
+                    self.procesarTile( vecinoAProcesar, cola )
+            
+            else: # osea tengo mas de un vecino a procesar... significa que tengo que unirlos forward!
+                vecinosAProcesar = self.vecinosAProcesar(nodo)
+                if len( vecinosAProcesar ) == 0:
+                    self.mesh.agregarTapaANodo( nodo )
+                    return self.finCamino( cola )
+
+                vecinoFwdMasCercano = self.nodoMasCercano( nodo, vecinosAProcesar )
+
+                vecinosAProcesar.remove( vecinoFwdMasCercano )
+                self.pasarVecinosANodo( nodo, vecinoFwdMasCercano, vecinosAProcesar)
+                self.procesarTile( nodo, cola )
 
     def finCamino(self, cola):
         if len(cola) == 0:
             return # listo termine !
         else:
-            self.procesarTile( cola.pop() , cola )
+            proximo = cola.pop()
+            if self.gradoNodo( proximo ) != 1:
+                self.procesarTile( proximo , cola )
+            else:
+                return
 
     def generarNodoIntermedio( self, nodoFrom, nodoTo ):
         self.G.remove_edge( nodoFrom, nodoTo )
@@ -90,17 +91,17 @@ class GrafoCentros:
         self.G.add_node( nodoIntermedio, posicion=posicionNodoIntermedio, radio=radioNodoIntermedio )
 
         self.G.add_edges_from( [(nodoFrom, nodoIntermedio), (nodoIntermedio, nodoTo) ] ) 
-        nx.set_edge_attributes( self.G, {(nodoFrom, nodoIntermedio):{'procesado': False}, (nodoIntermedio, nodoTo):{'procesado': False}})
+        nx.set_edge_attributes( self.G, {(nodoFrom, nodoIntermedio):{'procesada': False}, (nodoIntermedio, nodoTo):{'procesada': False}})
 
-    def generarIntermediosAJoint( self, nodoJoint ):
+    def generarIntermediosAJoint( self, nodoFrom, nodoJoint ):
         '''
             Este metodo no existe en el algoritmo original. La idea es agregar nodos
             intermedios en el caso de que haya dos nodos joints que son vecinos.
             Si no hago esto tengo un problema porque podria pasar que una joint ya tenga alguna
             de las bifurcaciones tileadas como si fuera de grado 2.
         ''' 
-        for vecino in self.vecinos( nodoJoint ):
-            if self.gradoNodo(vecino) > 2:
+        for vecino in list(self.vecinos( nodoJoint )):
+            if self.gradoNodo(vecino) > 2 and vecino != nodoFrom:
                 self.generarNodoIntermedio( nodoJoint, vecino )
 
     def planoPromedioJoint( self, nodoFrom, nodoJoint ):
@@ -141,6 +142,9 @@ class GrafoCentros:
     def iesimoVecino( self, nodo, i ):
         return list(self.vecinos( nodo ))[i]
 
+    def vecinosAProcesar( self, nodo ):
+        return [ vecino for vecino in self.vecinos(nodo) if not self.aristaFueProcesada(nodo, vecino )]
+
     def aristaFueProcesada(self, nodoFrom, nodoTo):
         return self.G.get_edge_data( nodoFrom, nodoTo )['procesada']
 
@@ -163,16 +167,21 @@ class GrafoCentros:
     def gradoNodo( self, nodo ):
         return self.G.degree( nodo )
 
-        
+
+def generarGrafo( listaPosiciones, listaRadios, listaAristas ):
+    G = nx.Graph()
+    G.add_nodes_from( [(idx, {'posicion': Vec3(*pos), 'radio': radio} ) for idx, (pos, radio) in enumerate(zip(listaPosiciones, listaRadios)) ] )
+    G.add_edges_from( listaAristas )
+    prepararAristas(G)
+    return G
+
 def prepararAristas( grafo ):
     for arista in grafo.edges():
         nx.set_edge_attributes( grafo, {arista : {'procesada':False}})
 
 if __name__ == '__main__':
-    G = nx.Graph()
-    G.add_nodes_from( [(0, {'posicion': Vec3(0,0,0), 'radio': 1.0}), (1, {'posicion': Vec3(1,0,0), 'radio': 1.3}), (2, {'posicion': Vec3(2,0,0), 'radio': 1.5}) ] )
-    G.add_edges_from( [(0,1), (1,2)])
-    prepararAristas( G )
-
+    G = generarGrafo( [ [0,0,0], [1,0,0], [2,0,0], [1, 2, 0], [1, -2, 0], [0, 3, 0], [0, -3, 0], [3, 1, 0], [3, -1, 0], [3.8, 1.8, 0], [3.8, -1.8, 0]],
+                    [0.7, 0.75, 0.8, .7, .7, .7, .7, .7, .7, .7, .7], 
+                    [(0,1), (1,2), (2,3), (2,4), (3,5), (4,6), (2,7), (2,8), (7,9), (8, 10)])
     GC = GrafoCentros( G )
     GC.tile()
