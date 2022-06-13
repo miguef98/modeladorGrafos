@@ -19,7 +19,7 @@ namespace params = CGAL::parameters;
 
 class CMesh{
 public:
-    CMesh( const vector< vector<float> >& vertices, const vector< vector<unsigned int> >& caras ) : mesh() {
+    CMesh( const vector< vector<double> >& vertices, const vector< vector<int> >& caras ) : mesh() {
         auto indices = vector< vIndex >();
         for( auto vertice = vertices.begin() ; vertice != vertices.end() ; vertice++ ){
             indices.push_back( mesh.add_vertex( Kernel::Point_3( (*vertice)[0], (*vertice)[1], (*vertice)[2] ) ) );
@@ -29,7 +29,7 @@ public:
         }
     }
 
-    void subdivide( unsigned int step = 1 ) {
+    void subdivide( int step = 1 ) {
         Subdivision_method_3::CatmullClark_subdivision(mesh, params::number_of_iterations(step));
     }
 

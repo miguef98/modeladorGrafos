@@ -1,3 +1,5 @@
 import build.MeshGen as mg
+import numpy as np
 
-print( mg.add(1,2))
+c = mg.CMesh( [ [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, -1.0, 0.0] ], [ [0, 1, 2, 3] ])
+
