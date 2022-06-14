@@ -1,7 +1,7 @@
-from mesh import MeshGrafo
+from src.mesh_gen.mesh import MeshGrafo
 import numpy as np
 import networkx as nx
-from vec3 import Vec3
+from src.mesh_gen.vec3 import Vec3
 
 def centroMasa( x, y ):
     return (x + y) / 2
@@ -167,6 +167,15 @@ class GrafoCentros:
     def gradoNodo( self, nodo ):
         return self.G.degree( nodo )
 
+    def getVertices( self ):
+        return np.array( self.mesh.getVertices() )
+
+    def getCaras( self ):
+        return np.array( self.mesh.getCaras() )
+
+    def subdivide( self, step = 1):
+        self.mesh.subdivide( step )
+        return self
 
 def generarGrafo( listaPosiciones, listaRadios, listaAristas ):
     G = nx.Graph()
@@ -180,8 +189,6 @@ def prepararAristas( grafo ):
         nx.set_edge_attributes( grafo, {arista : {'procesada':False}})
 
 if __name__ == '__main__':
-    G = generarGrafo( [ [0,0,0], [1,0,0], [2,0,0], [1, 2, 0], [1, -2, 0], [0, 3, 0], [0, -3, 0], [3, 1, 0], [3, -1, 0], [3.8, 1.8, 0], [3.8, -1.8, 0]],
-                    [0.7, 0.75, 0.8, .7, .7, .7, .7, .7, .7, .7, .7], 
-                    [(0,1), (1,2), (2,3), (2,4), (3,5), (4,6), (2,7), (2,8), (7,9), (8, 10)])
+    G = generarGrafo( [ [0,0,0], [1,0,0], [2,0,0], [3, 1, 0], [3, -1, 0], [3.8, 1.8, 0], [3.8, -1.8, 0]], [0.7, 0.75, 0.8, .7, .7, .7, .7], [(0,1), (1,2), (2,3), (2,4), (3,5), (4,6)])
     GC = GrafoCentros( G )
     GC.tile()

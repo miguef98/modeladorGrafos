@@ -1,5 +1,6 @@
 import numpy as np
 from itertools import permutations
+import src.mesh_gen.MeshGen as mg
 
 class Cuadrado:
     ''' 
@@ -26,6 +27,7 @@ class MeshGrafo:
         self.cuadradoNodo = {}
         self.caras = []
         self.G = G
+        self.meshEnC = None
 
     def agregarCuadrado( self, nodo, normal, upVector ):
         self.cuadradoNodo[nodo] = Cuadrado( self.G.posicionNodo(nodo) , normal, upVector )
@@ -89,10 +91,10 @@ class MeshGrafo:
             suponiendo que estan orientados con un upVector proyectado.
         '''
         return [ 
-            self.indiceVertice( nodoFrom, cuadrante ),
             self.indiceVertice( nodoTo, cuadrante ),
-            self.indiceVertice( nodoTo, (cuadrante + 1) % 4 ),
-            self.indiceVertice( nodoFrom, (cuadrante + 1) % 4 )
+            self.indiceVertice( nodoFrom, cuadrante ),
+            self.indiceVertice( nodoFrom, (cuadrante + 1) % 4 ),
+            self.indiceVertice( nodoTo, (cuadrante + 1) % 4 )
         ]
 
     def calcularCaraCuadranteEntreNodoYVertices( self, nodo, indicesVertices, cuadrante ):
@@ -110,12 +112,28 @@ class MeshGrafo:
         normasDeFrobenius = [ np.exp( np.linalg.norm( (np.full_like( permutacionesVertices, verticesNodo) - permutacionesVertices)[i] , 'fro') ) / np.exp( self.G.radioNodo(nodo) * 2) for i in range(len(permutacionesVertices))]
 
         verticesOrdenOptimo = permutacionesIndices[ np.argmin( normasDeFrobenius ) ]
-        return [ 
+        indicesVerticesCara = [ 
             self.indiceVertice( nodo, cuadrante ),
             verticesOrdenOptimo[ cuadrante ],
             self.indiceVertice( nodo, (cuadrante + 1) % 4),
             verticesOrdenOptimo[ (cuadrante + 1) % 4 ]
         ]
+
+        centroMasaCara = np.sum( [ self.vertice(i) for i in indicesVerticesCara ] ) / 4
+        normalCara = self.vertice( indicesVerticesCara[0] ).planoFormado( self.vertice( indicesVerticesCara[1] ), self.vertice( indicesVerticesCara[2] ))
+        verticesDesdeCentroMasa = [ centroMasaCara.dirTo( self.vertice(i) ) for i in indicesVerticesCara ]
+        angulos = [ verticesDesdeCentroMasa[0].angleTo( vertice, normalCara ) for vertice in verticesDesdeCentroMasa[1:] ]
+        ordenAngulos = np.argsort( angulos )
+        
+        return [
+            indicesVerticesCara[0],
+            indicesVerticesCara[ ordenAngulos[0] ],
+            indicesVerticesCara[ ordenAngulos[1] ],
+            indicesVerticesCara[ ordenAngulos[2] ]
+        ]
+
+
+
 
     def tileTrivially( self, nodoFrom, nodoTo ):
         if not nodoTo in self.cuadradoNodo:
@@ -190,11 +208,20 @@ class MeshGrafo:
     def indiceVertice( nodo, nroVertice ):
         return ( nodo * 4 ) + ( nroVertice + 1 )
 
+    def subdivide( self, step ):
+        if self.meshEnC is None:
+            self.meshEnC = mg.CMesh( self.getVertices(), self.getCaras() )
+            self.meshEnC.subdivide( step )
+
     def getVertices( self ):
-        return np.array(
-            [ self.vertice(i).toNumpy() for i in range(1, len(self.G.nodos()) * 4 + 1)]
-        )
+        if self.meshEnC is None:
+            return [ self.vertice(i).toNumpy() for i in range(1, len(self.G.nodos()) * 4 + 1)]
+        else:
+            return self.meshEnC.getVertices()
     
     def getCaras( self ):
-        return np.array( self.caras ) - np.ones_like( self.caras )
+        if self.meshEnC is None:
+            return list( np.array( self.caras ) - np.ones_like( self.caras ) )
+        else:
+            return self.meshEnC.getCaras()
 

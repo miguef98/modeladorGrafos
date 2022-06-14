@@ -4,3 +4,6 @@ Install:
     2_ ./configure.sh
     3_ ./build.sh
 
+Import:
+
+    1_ src.mesh_gen.modelador

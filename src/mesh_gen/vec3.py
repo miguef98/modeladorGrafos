@@ -137,7 +137,7 @@ class Vec3:
         return self - self.projectToVector( normal )
 
     def planoFormado( self, v1, v2 ):
-        return ( v1 - self ).cross( v2 - self )
+        return (( v1 - self ).cross( v2 - self )).normalizar()
 
     def toList( self ):
         return [ self.x, self.y, self.z ]
