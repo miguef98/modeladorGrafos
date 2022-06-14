@@ -12,6 +12,7 @@ src/__pycache__
 *.slo
 *.lo
 *.o
+*.off
 *.obj
 
 # Precompiled Headers
