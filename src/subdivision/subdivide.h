@@ -35,11 +35,7 @@ public:
     }
 
     void subdivide( int step = 1 ) {
-        std::ofstream out1("preview.off");
-        out1 << mesh;
         Subdivision_method_3::CatmullClark_subdivision(mesh, params::number_of_iterations(step));
-        std::ofstream out2("result.off");
-        out2 << mesh;
     }
 
     py::list getVertices() const{
@@ -65,6 +61,11 @@ public:
             res.append(cara);
         }
         return res;
+    }
+
+    void exportar( const std::string& path ) const {
+        std::ofstream out(path);
+        out << mesh;
     }
 
 private:

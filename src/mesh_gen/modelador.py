@@ -177,6 +177,9 @@ class GrafoCentros:
         self.mesh.subdivide( step )
         return self
 
+    def exportar( self, path="result.off" ):
+        self.mesh.exportar( path )
+
 def generarGrafo( listaPosiciones, listaRadios, listaAristas ):
     G = nx.Graph()
     G.add_nodes_from( [(idx, {'posicion': Vec3(*pos), 'radio': radio} ) for idx, (pos, radio) in enumerate(zip(listaPosiciones, listaRadios)) ] )

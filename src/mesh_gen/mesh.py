@@ -120,16 +120,16 @@ class MeshGrafo:
         ]
 
         centroMasaCara = np.sum( [ self.vertice(i) for i in indicesVerticesCara ] ) / 4
-        normalCara = self.vertice( indicesVerticesCara[0] ).planoFormado( self.vertice( indicesVerticesCara[1] ), self.vertice( indicesVerticesCara[2] ))
-        verticesDesdeCentroMasa = [ centroMasaCara.dirTo( self.vertice(i) ) for i in indicesVerticesCara ]
-        angulos = [ verticesDesdeCentroMasa[0].angleTo( vertice, normalCara ) for vertice in verticesDesdeCentroMasa[1:] ]
-        ordenAngulos = np.argsort( angulos )
+        verticesDesdeCentroMasa = [ self.vertice(i) - centroMasaCara for i in indicesVerticesCara ]
+        angulos = [0] + [ verticesDesdeCentroMasa[0].angleTo( vertice, verticesDesdeCentroMasa[0].cross(verticesDesdeCentroMasa[1]).normalizar() ) for vertice in verticesDesdeCentroMasa[1:] ]
         
+        ordenAngulos = np.argsort( angulos )
+
         return [
-            indicesVerticesCara[0],
             indicesVerticesCara[ ordenAngulos[0] ],
             indicesVerticesCara[ ordenAngulos[1] ],
-            indicesVerticesCara[ ordenAngulos[2] ]
+            indicesVerticesCara[ ordenAngulos[2] ],
+            indicesVerticesCara[ ordenAngulos[3] ]
         ]
 
 
@@ -211,7 +211,8 @@ class MeshGrafo:
     def subdivide( self, step ):
         if self.meshEnC is None:
             self.meshEnC = mg.CMesh( self.getVertices(), self.getCaras() )
-            self.meshEnC.subdivide( step )
+        
+        self.meshEnC.subdivide( step )
 
     def getVertices( self ):
         if self.meshEnC is None:
@@ -224,4 +225,10 @@ class MeshGrafo:
             return list( np.array( self.caras ) - np.ones_like( self.caras ) )
         else:
             return self.meshEnC.getCaras()
+
+    def exportar( self, path ):
+        if self.meshEnC is None:
+            self.meshEnC = mg.CMesh( self.getVertices(), self.getCaras() )
+        
+        self.meshEnC.exportar( path )
 
