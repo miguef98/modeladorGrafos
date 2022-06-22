@@ -1,3 +1,4 @@
+from zmq import VMCI_CONNECT_TIMEOUT
 from src.mesh_gen.mesh import MeshGrafo
 import numpy as np
 import networkx as nx
@@ -21,11 +22,7 @@ class GrafoCentros:
         
         # tengo que elegir algun nodo de grado 1 donde comenzar a recorrer
         # el grafo
-        nodoInicial = None
-        for nodo in self.nodos():
-            if self.gradoNodo(nodo) == 1:
-                nodoInicial = nodo
-                break
+        nodoInicial = self.elegirNodoGrado( 1 )
 
         cola = set()
         self.procesarTile( nodoInicial, cola )
@@ -35,14 +32,17 @@ class GrafoCentros:
             vecinoAProcesar = self.iesimoVecino(nodo, 0)
             normalCuadrado = self.direccion(nodo, vecinoAProcesar )
             self.mesh.agregarCuadrado( nodo, normalCuadrado, Vec3.random().projectToPlane(normalCuadrado).normalizar() )       
-            #self.mesh.agregarCuadrado( nodo, normalCuadrado, Vec3(0.3,0.5,1).projectToPlane(normalCuadrado).normalizar() )       
             self.mesh.tileTrivially( nodo, vecinoAProcesar )
             self.procesarTile( vecinoAProcesar, cola )
         
         else:
             vecinosAProcesar = self.vecinosAProcesar(nodo)
             cantVecinosAProcesar = len(vecinosAProcesar)
-            if cantVecinosAProcesar == 1:
+            if cantVecinosAProcesar == 0:
+                self.mesh.agregarTapaANodo( nodo )
+                return self.finCamino( cola )
+
+            elif cantVecinosAProcesar == 1:
                 vecinoAProcesar = vecinosAProcesar[0]
                 if self.gradoNodo( vecinoAProcesar ) == 1:
                     self.mesh.tileTrivially( nodo, vecinoAProcesar )
@@ -58,11 +58,6 @@ class GrafoCentros:
                     self.procesarTile( vecinoAProcesar, cola )
             
             else: # osea tengo mas de un vecino a procesar... significa que tengo que unirlos forward!
-                vecinosAProcesar = self.vecinosAProcesar(nodo)
-                if len( vecinosAProcesar ) == 0:
-                    self.mesh.agregarTapaANodo( nodo )
-                    return self.finCamino( cola )
-
                 vecinoFwdMasCercano = self.nodoMasCercano( nodo, vecinosAProcesar )
 
                 vecinosAProcesar.remove( vecinoFwdMasCercano )
@@ -90,8 +85,9 @@ class GrafoCentros:
         radioNodoIntermedio = (self.radioNodo( nodoFrom ) + self.radioNodo(nodoTo)) / 2
         self.G.add_node( nodoIntermedio, posicion=posicionNodoIntermedio, radio=radioNodoIntermedio )
 
-        self.G.add_edges_from( [(nodoFrom, nodoIntermedio), (nodoIntermedio, nodoTo) ] ) 
-        nx.set_edge_attributes( self.G, {(nodoFrom, nodoIntermedio):{'procesada': False}, (nodoIntermedio, nodoTo):{'procesada': False}})
+        self.G.add_edges_from( [(nodoFrom, nodoIntermedio), (nodoIntermedio, nodoTo) ] )
+        self.setearAristaNoProcesada( nodoFrom, nodoIntermedio )
+        self.setearAristaNoProcesada( nodoIntermedio, nodoTo )
 
     def generarIntermediosAJoint( self, nodoFrom, nodoJoint ):
         '''
@@ -125,13 +121,16 @@ class GrafoCentros:
         for vecino in vecinos:
             self.G.remove_edge( nodoOriginal, vecino )
             self.G.add_edge( nodoActual, vecino )
-            nx.set_edge_attributes( self.G, {(nodoActual, vecino) : {'procesada' : False}})
+            self.setearAristaNoProcesada( nodoActual, vecino )
 
     def direccion( self, nodoFrom, nodoTo ):
         return self.posicionNodo( nodoFrom ).dirTo( self.posicionNodo(nodoTo) )
-    
+
     def setearAristaProcesada( self, nodoFrom, nodoTo ):
         nx.set_edge_attributes(self.G, {(nodoFrom, nodoTo) : {'procesada':True}})
+    
+    def setearAristaNoProcesada( self, nodoFrom, nodoTo ):
+        nx.set_edge_attributes(self.G, {(nodoFrom, nodoTo) : {'procesada':False}})
 
     def vecinos( self, nodo ):
         return ( list(arista)[1] for arista in self.G.edges(nodo) )
@@ -177,21 +176,35 @@ class GrafoCentros:
         self.mesh.subdivide( step )
         return self
 
+    def elegirNodoGrado( self, grado ):
+        for nodo in self.nodos():
+            if self.gradoNodo(nodo) == grado:
+                return nodo
+
     def exportar( self, path="result.off" ):
         self.mesh.exportar( path )
 
-def generarGrafo( listaPosiciones, listaRadios, listaAristas ):
-    G = nx.Graph()
-    G.add_nodes_from( [(idx, {'posicion': Vec3(*pos), 'radio': radio} ) for idx, (pos, radio) in enumerate(zip(listaPosiciones, listaRadios)) ] )
-    G.add_edges_from( listaAristas )
-    prepararAristas(G)
-    return G
+    def eliminarNodo( self, nodo ):
+        if self.gradoNodo( nodo ) == 2:
+            vecinos = list(self.vecinos(nodo))
+            self.G.add_edge( *vecinos )
+            self.G.remove_node( nodo )
+            self.setearAristaProcesada( *vecinos )
+        else:
+            vecinoMasCercano = self.vecinoMasCercano( nodo )
+            for vecino in self.vecinosDistintos(nodo, [vecinoMasCercano]):
+                self.G.add_edge( vecinoMasCercano, vecino )
+                self.setearAristaNoProcesada(vecinoMasCercano, vecino)        
 
-def prepararAristas( grafo ):
-    for arista in grafo.edges():
-        nx.set_edge_attributes( grafo, {arista : {'procesada':False}})
+    def resamplear( self ):
+        '''
+            Resampleo el grafo de manera medio trucheli.
+        '''
 
-if __name__ == '__main__':
-    G = generarGrafo( [ [0,0,0], [1,0,0], [2,0,0], [3, 1, 0], [3, -1, 0], [3.8, 1.8, 0], [3.8, -1.8, 0]], [0.7, 0.75, 0.8, .7, .7, .7, .7], [(0,1), (1,2), (2,3), (2,4), (3,5), (4,6)])
-    GC = GrafoCentros( G )
-    GC.tile()
+        for nodo in list(self.nodos()):
+            if self.gradoNodo(nodo) != 1 and self.posicionNodo(nodo).distTo( self.posicionNodo(self.vecinoMasCercano(nodo)) ) < self.radioNodo(nodo) * 2:
+                self.eliminarNodo(nodo)
+
+        self.G = nx.convert_node_labels_to_integers( self.G )
+        
+

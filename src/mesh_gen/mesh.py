@@ -138,13 +138,13 @@ class MeshGrafo:
     def tileTrivially( self, nodoFrom, nodoTo ):
         if not nodoTo in self.cuadradoNodo:
             self.agregarCuadradoOrientado( nodoFrom, nodoTo )
+            for cuadrante in range(4):
+                self.caras.append( self.calcularCaraCuadranteEntreNodos( nodoFrom, nodoTo, cuadrante ) )
 
-        # TO DO: else => tengo que ver que hago si ya esta...
-        # porque no puedo asumir que tienen el upVector orientado
-        # por lo pronto puedo usar agregarCuadranteEntreNodoYVertices
-        
-        for cuadrante in range(4):
-            self.caras.append( self.calcularCaraCuadranteEntreNodos( nodoFrom, nodoTo, cuadrante ) )
+        else:
+            indicesVerticesNodoTo = [ self.indiceVertice(nodoTo, i) for i in range(4) ]
+            for cuadrante in range(4):
+                self.caras.append( list(reversed(self.calcularCaraCuadranteEntreNodoYVertices( nodoFrom, indicesVerticesNodoTo, cuadrante))))
 
         self.G.setearAristaProcesada( nodoFrom, nodoTo )
 
@@ -201,7 +201,7 @@ class MeshGrafo:
              el nodo 1 los 5,6,7,8 ,etc etc ***
         '''
         if indice == 0 or indice > len( self.G.nodos() ) * 4:
-            raise ValueError( "Indice fuera de rango. El rango posible es (1, " + str(len(self.G.nodos()) * 4) + ")" )
+            raise ValueError( "El indice " + str(indice) + " esta fuera de rango. El rango posible es (1, " + str(len(self.G.nodos()) * 4) + ")" )
         return self.cuadradoNodo[ int( (indice - 1) / 4 ) ].vertices[ int( (indice - 1) % 4 ) ]
 
     @staticmethod
