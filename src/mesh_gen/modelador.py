@@ -1,8 +1,7 @@
-from zmq import VMCI_CONNECT_TIMEOUT
 from src.mesh_gen.mesh import MeshGrafo
 import numpy as np
 import networkx as nx
-from src.mesh_gen.vec3 import Vec3
+from src.mesh_gen.vec3 import Vec3, Interpolada
 
 def centroMasa( x, y ):
     return (x + y) / 2
@@ -12,11 +11,13 @@ class GrafoCentros:
         Clase grafo de centerline
     '''
     def __init__( self, grafo ):
-        self.G = grafo
+        self.G = nx.convert_node_labels_to_integers( grafo )
         if nx.number_connected_components( grafo ) != 1:
             raise ValueError( "El grafo tiene mas de 1 componente conexa" )
 
         self.mesh = MeshGrafo( self )
+
+        self.maxNombre = self.cantNodos( ) - 1
 
     def tile( self ):
         
@@ -153,6 +154,9 @@ class GrafoCentros:
     def vecinoMasCercano( self, nodo ):
         return self.nodoMasCercano( nodo, list( self.vecinos(nodo) ))
     
+    def cantNodos( self ):
+        return len(self.nodos())
+
     def nodos( self ):
         return self.G.nodes
 
@@ -165,6 +169,10 @@ class GrafoCentros:
 
     def gradoNodo( self, nodo ):
         return self.G.degree( nodo )
+
+    def getNuevoNombreNodo( self ):
+        self.maxNombre += 1
+        return self.maxNombre
 
     def getVertices( self ):
         return np.array( self.mesh.getVertices() )
@@ -184,6 +192,11 @@ class GrafoCentros:
     def exportar( self, path="result.off" ):
         self.mesh.exportar( path )
 
+    def crearNodo( self, posicion, radio ):
+        nombre = self.getNuevoNombreNodo()
+        self.G.add_node( nombre, posicion=posicion, radio=radio)
+        return nombre
+    
     def eliminarNodo( self, nodo ):
         if self.gradoNodo( nodo ) == 2:
             vecinos = list(self.vecinos(nodo))
@@ -194,17 +207,120 @@ class GrafoCentros:
             vecinoMasCercano = self.vecinoMasCercano( nodo )
             for vecino in self.vecinosDistintos(nodo, [vecinoMasCercano]):
                 self.G.add_edge( vecinoMasCercano, vecino )
-                self.setearAristaNoProcesada(vecinoMasCercano, vecino)        
+                self.setearAristaNoProcesada(vecinoMasCercano, vecino)  
+
+    def obtenerRamasDesdeNodo( self, nodoInicial, nodoProcedencia=None ):
+        '''
+            Devuelvo los nodos de una rama, partiendo de un nodo inicial, que presunpongo de grado 1 o n > 2.
+        '''
+        ramas = []
+        nodoPrevio = nodoInicial
+        for nodoActual in self.vecinos(nodoPrevio):
+            if not nodoProcedencia is None and nodoActual == nodoProcedencia:
+                continue
+            
+            nodosRama = [ nodoPrevio ]
+
+            while self.gradoNodo(nodoActual) == 2:
+                nodosRama.append(nodoActual)
+                nodoProximo = self.vecinosDistintos( nodoActual, [ nodoPrevio ] )[0]
+                nodoPrevio = nodoActual
+                nodoActual = nodoProximo
+
+            nodosRama.append(nodoActual)
+
+            ramas.append(nodosRama)
+            nodoPrevio = nodoInicial
+
+        return ramas
 
     def resamplear( self ):
-        '''
-            Resampleo el grafo de manera medio trucheli.
-        '''
-
-        for nodo in list(self.nodos()):
-            if self.gradoNodo(nodo) != 1 and self.posicionNodo(nodo).distTo( self.posicionNodo(self.vecinoMasCercano(nodo)) ) < self.radioNodo(nodo) * 2:
-                self.eliminarNodo(nodo)
-
+        self.resamplearGrafo( self.elegirNodoGrado( 1 ), None, {} )
         self.G = nx.convert_node_labels_to_integers( self.G )
+
+    def resamplearGrafo( self, nodoInicial, nodoProcedente, nodosJointVisitados ):
+        ramas = self.obtenerRamasDesdeNodo( nodoInicial, nodoProcedente )
+
+        for rama in ramas:
+            nodosNuevos = self.resamplearRama( rama, 5 )
+
+            proxNodoInicial = rama[-1]
+
+            if not proxNodoInicial in nodosJointVisitados and self.gradoNodo(proxNodoInicial) != 1:
+                nodosJointVisitados[proxNodoInicial] = True
+                self.resamplearGrafo( proxNodoInicial, nodosNuevos[-1], nodosJointVisitados)
+
+    def resamplearRama( self, listaNodos, N ):
+        '''
+            Para resamplear una rama (es decir un camino donde salvo el nodo inicial y el final todos son de grado 2),
+            interpolo los puntos con una curva usando scipy y luego tomo N-2 puntos de esa curva con un espaciado uniforme.
+            No anda para N = 2.
+        '''
+
+        # duplico bordes para no perderlos al hacer Catmull-Rom
+        posicionesNodos = [ self.posicionNodo( nodo ) for nodo in listaNodos ]
+        posicionesNodos = [posicionesNodos[0]] + posicionesNodos + [posicionesNodos[-1]]
+
+        radioNodos = [ self.radioNodo( nodo ) for i, nodo in enumerate(listaNodos) ]
+        radioNodos = [ radioNodos[0] ] + radioNodos + [ radioNodos[-1] ]
+
+        curvaPosicionesInterpolada = Interpolada( posicionesNodos )
+        curvaRadiosInterpolada = Interpolada( radioNodos )
+
+        nuevasPosiciones = [ curvaPosicionesInterpolada.evaluar( i / (N - 1) ) for i in range(N ) ]
+        nuevosRadios = [ curvaRadiosInterpolada.evaluar( i / (N - 1) ) for i in range(N ) ]
+
+        # elimino todos los nodos entre puntas
+        for nodo in listaNodos[1:-1]:
+            self.G.remove_node( nodo )
+
+        nodosNuevos = []
+        ultimoNodo = listaNodos[0]
+        for posicion, radio in zip( nuevasPosiciones[1:-1], nuevosRadios[1:-1] ) :
+            
+            nuevoNodo = self.crearNodo( posicion, radio )
+            nodosNuevos.append( nuevoNodo )
+            
+            self.G.add_edge( ultimoNodo, nuevoNodo )
+            self.setearAristaNoProcesada( ultimoNodo, nuevoNodo )
+
+            ultimoNodo = nuevoNodo
+        
+        self.G.add_edge( ultimoNodo, listaNodos[-1] )
+        self.setearAristaNoProcesada( ultimoNodo, listaNodos[-1] )
+
+        return nodosNuevos
+
+    def resamplearRamaEquidistante( self, listaNodos, pisoSampleo ):
+        '''
+            Dada una lista de nodos, resampleamos tomando puntos equidistantes con un piso sobre a la cantidad.
+        '''
+        # duplico bordes para no perderlos al hacer Catmull-Rom
+        posicionesNodos = [ self.posicionNodo( nodo ) for nodo in listaNodos ]
+        posicionesNodos = [posicionesNodos[0]] + posicionesNodos + [posicionesNodos[-1]]
+
+        radioNodos = [ np.array( [ i, self.radioNodo( nodo )] ) for i, nodo in enumerate(listaNodos) ]
+        radioNodos = [ np.array([0, radioNodos[0]]) ] + radioNodos + [ np.array( [len(listaNodos) - 1, radioNodos[-1] ]) ]
+
+        curvaPosicionesInterpolada = Interpolada( posicionesNodos )
+        curvaRadiosInterpolada = Interpolada( radioNodos )
+
+        longitudArcoCurva = curvaPosicionesInterpolada.longitudDeArco()
+        # para tener la cantidad de puntos del piso, tengo que tener los puntos espaciados cada
+        espaciado = longitudArcoCurva / pisoSampleo
+        nuevasPosiciones = curvaPosicionesInterpolada
+
+
+
+
+
+
+
+
+
+
+
+
+
         
 

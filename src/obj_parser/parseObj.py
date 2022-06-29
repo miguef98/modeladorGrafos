@@ -4,7 +4,7 @@ from scipy.spatial import KDTree
 from src.mesh_gen.vec3 import Vec3
 
 def calcularGrafoYArbol( fileObj, fileRadios ):
-    radios = np.load(fileRadios) / 2
+    radios = np.load(fileRadios)
     verticesCrudos = []
     vertices = []
     lineas = []

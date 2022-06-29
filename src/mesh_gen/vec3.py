@@ -156,3 +156,55 @@ class Vec3:
     def random( cls ):
         # devuelve vector normalizado random
         return Vec3( *np.random.uniform(-1, 1, 3) ).normalizar()
+
+
+class Interpolada:
+    def __init__( self, puntos ):
+        '''
+            Supongo puntos es lista de Vec3
+        '''
+        self.puntos = puntos
+    
+    def evaluar( self, t ):
+        '''
+            Recibe t entre [0,1).
+        '''
+        if t < 0 or t > 1:
+            raise ValueError("Se espera t en rango [0,1)")
+
+        cantCurvas = (len(self.puntos) - 3)
+        
+        if np.isclose(t, 1):
+          return self.evaluarCurva( cantCurvas, 1 )
+
+        indicePunto = np.floor( t * cantCurvas ).astype(np.uint32) + 1
+        
+        return self.evaluarCurva(indicePunto, ( t - (indicePunto - 1) / cantCurvas ) * cantCurvas )
+
+    def evaluarCurva( self, indice, t ):
+        if t < 0 or t > 1:
+            raise ValueError("Se espera t en rango [0,1)")
+
+        def spline_4p( t, p_1, p0, p1, p2 ):
+
+            return (
+                t*((2-t)*t - 1)   * p_1
+                + (t*t*(3*t - 5) + 2) * p0
+                + t*((4 - 3*t)*t + 1) * p1
+                + (t-1)*t*t         * p2 ) / 2
+
+        return spline_4p(t, self.puntos[indice - 1], self.puntos[indice], self.puntos[indice + 1], self.puntos[indice + 2])
+
+    def longitudDeArco( self, *, eps=0.01, tinicial=0, tfinal=1 ):
+        longitud = 0
+        ultimoValor = self.evaluar(tinicial)
+        for step in np.arange(eps, tfinal + eps, eps):
+            nuevoValor = self.evaluar( step )
+            longitud += ultimoValor.distTo( nuevoValor )
+            ultimoValor = nuevoValor
+
+        return longitud
+
+
+
+
