@@ -195,15 +195,34 @@ class Interpolada:
 
         return spline_4p(t, self.puntos[indice - 1], self.puntos[indice], self.puntos[indice + 1], self.puntos[indice + 2])
 
-    def longitudDeArco( self, *, eps=0.01, tinicial=0, tfinal=1 ):
+    def longitudDeArco( self, *, eps=0.01, tInicial=0, tFinal=1 ):
+        if tFinal - tInicial <= eps:
+            return self.evaluar(tInicial).distTo( self.evaluar(tFinal))
+
         longitud = 0
-        ultimoValor = self.evaluar(tinicial)
-        for step in np.arange(eps, tfinal + eps, eps):
+        ultimoValor = self.evaluar(tInicial)
+        for step in np.arange(eps, tFinal + eps, eps):
             nuevoValor = self.evaluar( step )
             longitud += ultimoValor.distTo( nuevoValor )
             ultimoValor = nuevoValor
 
         return longitud
+
+    def puntosADistancia( self, distancia, *, eps=0.01, tInicial=0, tFinal=1 ):
+        '''
+            Calculo puntos espaciados por distancia, recorriendo la curva desde tInicial a tFinal con paso epsilon.
+        '''
+
+        indices = [ tInicial ]
+
+        tActual = tInicial + eps
+        while tActual < tFinal:
+            if self.longitudDeArco( tInicial=indices[-1], tFinal=tActual ) >= distancia :
+                indices.append(tActual)
+            
+            tActual += eps
+
+        return indices
 
 
 

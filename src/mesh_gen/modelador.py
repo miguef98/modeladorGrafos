@@ -162,7 +162,12 @@ class GrafoCentros:
 
     def posicionNodo( self, nodo ):
         # cuando arme el nodo pongo la posicion como un Vec3
-        return nx.get_node_attributes( self.G, 'posicion' )[nodo]
+        posicion = nx.get_node_attributes( self.G, 'posicion' )[nodo]
+        if not isinstance(posicion, Vec3):
+            nx.set_node_attributes( self.G, {nodo: Vec3(*posicion)}, 'posicion')
+            posicion = nx.get_node_attributes( self.G, 'posicion' )[nodo]
+
+        return posicion
 
     def radioNodo( self, nodo ):
         return nx.get_node_attributes( self.G, 'radio' )[nodo]
@@ -234,21 +239,21 @@ class GrafoCentros:
 
         return ramas
 
-    def resamplear( self ):
-        self.resamplearGrafo( self.elegirNodoGrado( 1 ), None, {} )
+    def resamplear( self, puntosPorRama ):
+        self.resamplearGrafo( self.elegirNodoGrado( 1 ), None, {}, puntosPorRama )
         self.G = nx.convert_node_labels_to_integers( self.G )
 
-    def resamplearGrafo( self, nodoInicial, nodoProcedente, nodosJointVisitados ):
+    def resamplearGrafo( self, nodoInicial, nodoProcedente, nodosJointVisitados, puntosPorRama ):
         ramas = self.obtenerRamasDesdeNodo( nodoInicial, nodoProcedente )
 
         for rama in ramas:
-            nodosNuevos = self.resamplearRama( rama, 5 )
+            nodosNuevos = self.resamplearRama( rama, puntosPorRama )
 
             proxNodoInicial = rama[-1]
 
             if not proxNodoInicial in nodosJointVisitados and self.gradoNodo(proxNodoInicial) != 1:
                 nodosJointVisitados[proxNodoInicial] = True
-                self.resamplearGrafo( proxNodoInicial, nodosNuevos[-1], nodosJointVisitados)
+                self.resamplearGrafo( proxNodoInicial, nodosNuevos[-1], nodosJointVisitados, puntosPorRama )
 
     def resamplearRama( self, listaNodos, N ):
         '''
@@ -291,36 +296,29 @@ class GrafoCentros:
 
         return nodosNuevos
 
-    def resamplearRamaEquidistante( self, listaNodos, pisoSampleo ):
-        '''
-            Dada una lista de nodos, resampleamos tomando puntos equidistantes con un piso sobre a la cantidad.
-        '''
-        # duplico bordes para no perderlos al hacer Catmull-Rom
-        posicionesNodos = [ self.posicionNodo( nodo ) for nodo in listaNodos ]
-        posicionesNodos = [posicionesNodos[0]] + posicionesNodos + [posicionesNodos[-1]]
+    def resamplearRamaBidireccional( self, listaNodos, *, alpha=0.1, beta=0.1 ):
+        curvaturas = curvatura( [ self.posicion(nodo) for nodo in listaNodos ] )
+        g = lambda i: alpha * self.radioNodo(listaNodos[i]) / (1 * beta * curvaturas[i])
 
-        radioNodos = [ np.array( [ i, self.radioNodo( nodo )] ) for i, nodo in enumerate(listaNodos) ]
-        radioNodos = [ np.array([0, radioNodos[0]]) ] + radioNodos + [ np.array( [len(listaNodos) - 1, radioNodos[-1] ]) ]
+        indice0 = 1
+        indice1 = listaNodos[-2]
 
-        curvaPosicionesInterpolada = Interpolada( posicionesNodos )
-        curvaRadiosInterpolada = Interpolada( radioNodos )
-
-        longitudArcoCurva = curvaPosicionesInterpolada.longitudDeArco()
-        # para tener la cantidad de puntos del piso, tengo que tener los puntos espaciados cada
-        espaciado = longitudArcoCurva / pisoSampleo
-        nuevasPosiciones = curvaPosicionesInterpolada
+        while True:
+            
 
 
 
 
 
+def curvatura( puntos ):
+    curvaturas = []
 
+    for i in range(1, len(puntos) - 1):
+        p1 = puntos[i+1] - puntos[i]
+        p2 = puntos[i-1] - puntos[i]
 
+        angulo = p1.angleTo( p2, p1.cross(p2).normalizar() )
 
+        curvaturas.append( angulo / (p1.norm2() + p2.norm2()))
 
-
-
-
-
-        
-
+    return curvaturas
