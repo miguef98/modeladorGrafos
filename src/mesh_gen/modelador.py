@@ -1,6 +1,8 @@
 from src.mesh_gen.mesh import MeshGrafo
 import numpy as np
 import networkx as nx
+from scipy.optimize import minimize
+from scipy import integrate
 from src.mesh_gen.vec3 import Vec3, Interpolada
 
 def centroMasa( x, y ):
@@ -202,17 +204,12 @@ class GrafoCentros:
         self.G.add_node( nombre, posicion=posicion, radio=radio)
         return nombre
     
+    def crearArista( self, nodoOrigen, nodoFin ):
+        self.G.add_edge( nodoOrigen, nodoFin )
+        self.setearAristaNoProcesada( nodoOrigen, nodoFin )
+    
     def eliminarNodo( self, nodo ):
-        if self.gradoNodo( nodo ) == 2:
-            vecinos = list(self.vecinos(nodo))
-            self.G.add_edge( *vecinos )
-            self.G.remove_node( nodo )
-            self.setearAristaProcesada( *vecinos )
-        else:
-            vecinoMasCercano = self.vecinoMasCercano( nodo )
-            for vecino in self.vecinosDistintos(nodo, [vecinoMasCercano]):
-                self.G.add_edge( vecinoMasCercano, vecino )
-                self.setearAristaNoProcesada(vecinoMasCercano, vecino)  
+        self.G.remove_node( nodo )
 
     def obtenerRamasDesdeNodo( self, nodoInicial, nodoProcedencia=None ):
         '''
@@ -239,75 +236,154 @@ class GrafoCentros:
 
         return ramas
 
-    def resamplear( self, puntosPorRama ):
-        self.resamplearGrafo( self.elegirNodoGrado( 1 ), None, {}, puntosPorRama )
+    def grafoDeRamas( self ):
+        grafo = nx.Graph()
+
+        nodoInicial = self.elegirNodoGrado(1)
+        
+
+    def resamplear( self, alpha=0.1, beta=0.1, w=0.01 ):
+        
+        self.resamplearGrafo( alpha, beta, w )
         self.G = nx.convert_node_labels_to_integers( self.G )
 
-    def resamplearGrafo( self, nodoInicial, nodoProcedente, nodosJointVisitados, puntosPorRama ):
-        ramas = self.obtenerRamasDesdeNodo( nodoInicial, nodoProcedente )
+    def resamplearGrafo( self, alpha, beta, w ):
+        ramas = self.grafoDeRamas( )
 
         for rama in ramas:
-            nodosNuevos = self.resamplearRama( rama, puntosPorRama )
+            ultimoNodoNuevo = self.resamplearRama( rama, alpha, beta, w ) 
+            
+            proxNodoInicial = rama[-1]
 
+    def resamplearRama( self, listaNodos, alpha, beta, w ):
+        
+        posicionesNodos = [ self.posicionNodo( nodo ) for nodo in listaNodos ]
+        curvaPosicionesInterpolada = Interpolada(  posicionesNodos ).reparametrizar( lambda x : np.clip(x, 0, 1))
+
+        radioNodos = [ self.radioNodo( nodo ) for nodo in listaNodos ]
+        radiosInterpolados = Interpolada( radioNodos ).reparametrizar( lambda x : np.clip(x, 0, 1))
+        
+        curvaturaNodos = curvatura( posicionesNodos )
+        curvaturaInterpolada = Interpolada( curvaturaNodos  ).reparametrizar( lambda x : np.clip(x, 0, 1))
+
+        termino = lambda j : radiosInterpolados[j] / (1 + beta * curvaturaInterpolada[j])
+        
+        def costo( ts ):
+            
+            sigmoide = lambda x : 1 / (1 + np.exp(-10*x))
+            f = lambda x, y: np.exp( -x + y )
+            h = lambda x, y: -x + f(0,y)
+            g = lambda x, y: h(x,y) * sigmoide(-x) + f(x,y) * sigmoide(x)
+
+            def CostoPrincipal( xs ):
+                return np.sum( 
+                    [ g( xs[0], 1 / len(xs) )]+
+                    [ g( xs[i+1] - xs[i], 1 / len(xs) ) for i in range(0, len(xs)-1)] +
+                    [ g( 1 - xs[-1], 1 / len(xs) )] )
+
+            def CostoSecundario( xs ):
+                return np.sum( 
+                    [ g( xs[0], alpha * (termino(0) + termino(xs[0])) )]+
+                    [ g( xs[i+1] - xs[i], alpha* (termino(xs[i]) + termino(xs[i+1])) ) for i in range(0, len(xs)-1)] +
+                    [ g( 1 - xs[-1], alpha*(termino(xs[1]) + termino(1) ) )] )
+
+            
+            return CostoPrincipal( ts ) + w * CostoSecundario( ts )
+        
+        cantPuntos = self.estimadorCantPuntos(termino, alpha)
+        paso = 1 / cantPuntos
+        ts = np.linspace(0 + paso, 1 - paso, cantPuntos)
+        parametros = minimize( costo, ts )        
+
+        return self.actualizarRama( listaNodos, curvaPosicionesInterpolada.evaluarLista(parametros.x), radiosInterpolados.evaluarLista(parametros.x) )
+
+    @staticmethod
+    def curvaInterpoladaConBordes( puntos, bordeIzq, bordeDer, cantPuntos ):
+        radioNodos = np.concatenate( [ bordeIzq, puntos, bordeDer  ] )
+        primerIndice = ( 1 / len(radioNodos) ) * cantPuntos
+        ultimoIndice = ( 1 / len(radioNodos) ) * ( cantPuntos + len(puntos) )
+        return Interpolada( radioNodos ).reparametrizar( lambda x : (ultimoIndice - primerIndice) * x + primerIndice ), ( -primerIndice / (ultimoIndice - primerIndice) + 0.01, (1-primerIndice) / (ultimoIndice - primerIndice) - 0.01)
+    
+    @staticmethod
+    def estimadorCantPuntos( h, alpha, grado=5 ):
+        integral = integrate.quad(h, 0, 1)
+        ak = integrate.newton_cotes( grado )[0]
+        return int( ((1 + alpha * (h(0) - h(1))) * np.max(ak)) / (2 * alpha * integral[0]) )
+
+    @staticmethod
+    def estimadorAlphaBeta( curvaRadios, curvaCurvaturas ):
+        '''
+            Quiero que el alpha sea mas grande cuando tengo radios mas chicos. Y mas chico cuando tengo radios mas grandes.
+            Esto es porque si tengo radios grandes, el resampleo es muy agresivo con alpha grande (osea elimino muchos puntos).
+            En cambio cuando tengo radios chicos, puedo permitirme alphas mas grandes.
+
+            En cuanto al beta, en ramas con mucha curvatura prefiero que sea mas bien grande. En ramas con poca curvatura puede ser chico.
+            Por lo que estuve testeando, betas mayores a 0.1 es ya demasiado.
+        '''
+        beta = integrate.quad( lambda t: curvaCurvaturas.evaluar(t), 0, 1 )[0] * 0.01
+
+        alpha = integrate.quad( lambda t: curvaRadios.evaluar(t), 0, 1)[0] * 0.
+
+        return 1, 1
+
+    def obtenerCurvas( self ):
+        return self.obtenerCurvasGrafo( self.elegirNodoGrado( 1 ), None, {} )
+
+    def obtenerCurvasGrafo( self, nodoInicial, nodoProcedente, nodosJointVisitados ):
+        ramas = self.obtenerRamasDesdeNodo( nodoInicial, nodoProcedente )
+    
+        curvasPosiciones = []
+        curvasRadios = []
+        curvasCurvaturas = []
+
+        for rama in ramas:
+            radioNodos = [ self.radioNodo( nodo ) for nodo in rama ]
+            bordeIzq = np.linspace( np.power(10, 1), radioNodos[0], len(rama) )
+            bordeDer = np.linspace( radioNodos[-1], np.power(10, 1), len(rama) )
+
+            radiosInterpolados, limitesRadios = self.curvaInterpoladaConBordes( radioNodos, bordeIzq, bordeDer, len(rama) )
+
+            posicionesNodos = [ self.posicionNodo( nodo ) for nodo in rama ]
+            curvaturaNodos = curvatura( posicionesNodos )
+            bordeIzq = list(reversed( np.exp(np.linspace(0, -10, len(rama)) * 1)* curvaturaNodos[0] + 0.5 ) )
+            bordeDer = np.exp( np.linspace(0, -10, len(rama)) * 1 ) * curvaturaNodos[-1] + 0.5
+            curvaturaInterpolada, limitesCurvatura = self.curvaInterpoladaConBordes( curvaturaNodos, bordeIzq, bordeDer, len(rama) )
+            
+            posicionesNodos = [ self.posicionNodo( nodo ) for nodo in rama ]
+            curvaPosicionesInterpolada = Interpolada(  [posicionesNodos[0]] + posicionesNodos + [posicionesNodos[-1]] )
+            
+            curvasPosiciones.append(curvaPosicionesInterpolada)
+            curvasRadios.append(radiosInterpolados)
+            curvasCurvaturas.append(curvaturaInterpolada)
+            
+
+            ultimoNodoNuevo = rama[-2]
+            
             proxNodoInicial = rama[-1]
 
             if not proxNodoInicial in nodosJointVisitados and self.gradoNodo(proxNodoInicial) != 1:
                 nodosJointVisitados[proxNodoInicial] = True
-                self.resamplearGrafo( proxNodoInicial, nodosNuevos[-1], nodosJointVisitados, puntosPorRama )
+                cp, cr, cc = self.obtenerCurvasGrafo( proxNodoInicial, ultimoNodoNuevo, nodosJointVisitados )
 
-    def resamplearRama( self, listaNodos, N ):
-        '''
-            Para resamplear una rama (es decir un camino donde salvo el nodo inicial y el final todos son de grado 2),
-            interpolo los puntos con una curva usando scipy y luego tomo N-2 puntos de esa curva con un espaciado uniforme.
-            No anda para N = 2.
-        '''
+                curvasPosiciones += cp
+                curvasRadios += cr
+                curvasCurvaturas += cc
 
-        # duplico bordes para no perderlos al hacer Catmull-Rom
-        posicionesNodos = [ self.posicionNodo( nodo ) for nodo in listaNodos ]
-        posicionesNodos = [posicionesNodos[0]] + posicionesNodos + [posicionesNodos[-1]]
-
-        radioNodos = [ self.radioNodo( nodo ) for i, nodo in enumerate(listaNodos) ]
-        radioNodos = [ radioNodos[0] ] + radioNodos + [ radioNodos[-1] ]
-
-        curvaPosicionesInterpolada = Interpolada( posicionesNodos )
-        curvaRadiosInterpolada = Interpolada( radioNodos )
-
-        nuevasPosiciones = [ curvaPosicionesInterpolada.evaluar( i / (N - 1) ) for i in range(N ) ]
-        nuevosRadios = [ curvaRadiosInterpolada.evaluar( i / (N - 1) ) for i in range(N ) ]
-
-        # elimino todos los nodos entre puntas
-        for nodo in listaNodos[1:-1]:
-            self.G.remove_node( nodo )
-
-        nodosNuevos = []
-        ultimoNodo = listaNodos[0]
-        for posicion, radio in zip( nuevasPosiciones[1:-1], nuevosRadios[1:-1] ) :
-            
-            nuevoNodo = self.crearNodo( posicion, radio )
-            nodosNuevos.append( nuevoNodo )
-            
-            self.G.add_edge( ultimoNodo, nuevoNodo )
-            self.setearAristaNoProcesada( ultimoNodo, nuevoNodo )
-
-            ultimoNodo = nuevoNodo
-        
-        self.G.add_edge( ultimoNodo, listaNodos[-1] )
-        self.setearAristaNoProcesada( ultimoNodo, listaNodos[-1] )
-
-        return nodosNuevos
-
-    def resamplearRamaBidireccional( self, listaNodos, *, alpha=0.1, beta=0.1 ):
-        curvaturas = curvatura( [ self.posicion(nodo) for nodo in listaNodos ] )
-        g = lambda i: alpha * self.radioNodo(listaNodos[i]) / (1 * beta * curvaturas[i])
-
-        indice0 = 1
-        indice1 = listaNodos[-2]
-
-        while True:
-            
+        return curvasPosiciones, curvasRadios, curvasCurvaturas
 
 
+    def actualizarRama( self, nodosARemplazar, nuevasPosiciones, nuevosRadios ):
+        [ self.eliminarNodo( nodo ) for nodo in nodosARemplazar[1:-1] ] # elimino los nodos menos los de las puntas
 
+        ultimoNodo = nodosARemplazar[0]
+        for posicion, radio in zip( nuevasPosiciones, nuevosRadios):
+            nodoNuevo = self.crearNodo( posicion, radio )
+            self.crearArista( ultimoNodo, nodoNuevo )
+            ultimoNodo = nodoNuevo
+
+        self.crearArista( ultimoNodo, nodosARemplazar[-1] )
+
+        return ultimoNodo
 
 
 def curvatura( puntos ):
@@ -317,8 +393,11 @@ def curvatura( puntos ):
         p1 = puntos[i+1] - puntos[i]
         p2 = puntos[i-1] - puntos[i]
 
-        angulo = p1.angleTo( p2, p1.cross(p2).normalizar() )
+        try: 
+            angulo = p1.angleTo( p2, p1.cross(p2).normalizar() )
+        except ValueError:
+            curvaturas.append([])
 
-        curvaturas.append( angulo / (p1.norm2() + p2.norm2()))
+        curvaturas.append( 1 / (angulo / (p1.norm2() + p2.norm2())))
 
-    return curvaturas
+    return [0] + curvaturas + [0]

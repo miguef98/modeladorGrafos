@@ -160,17 +160,24 @@ class Vec3:
 
 class Interpolada:
     def __init__( self, puntos ):
-        '''
-            Supongo puntos es lista de Vec3
-        '''
-        self.puntos = puntos
+        if len(puntos) < 2:
+            raise ValueError("No se puede interpolar menos de 2 puntos")
+        
+        self.puntos = [puntos[0]] + puntos + [puntos[-1]]
+        self.parametrizacion = lambda x : x
+        
+    def __getitem__(self, t):
+        return self.evaluar(t)
     
     def evaluar( self, t ):
         '''
-            Recibe t entre [0,1).
+            Recibe t entre [0,1].
         '''
+
+        t = self.parametrizacion(t)
+
         if t < 0 or t > 1:
-            raise ValueError("Se espera t en rango [0,1)")
+            raise ValueError("Se espera t en rango [0,1]. Pero se provio t=" + str(t) +".")
 
         cantCurvas = (len(self.puntos) - 3)
         
@@ -182,8 +189,6 @@ class Interpolada:
         return self.evaluarCurva(indicePunto, ( t - (indicePunto - 1) / cantCurvas ) * cantCurvas )
 
     def evaluarCurva( self, indice, t ):
-        if t < 0 or t > 1:
-            raise ValueError("Se espera t en rango [0,1)")
 
         def spline_4p( t, p_1, p0, p1, p2 ):
 
@@ -194,6 +199,13 @@ class Interpolada:
                 + (t-1)*t*t         * p2 ) / 2
 
         return spline_4p(t, self.puntos[indice - 1], self.puntos[indice], self.puntos[indice + 1], self.puntos[indice + 2])
+
+    def evaluarLista( self , ts ):
+        '''
+            ts array-like.
+        '''
+
+        return ( self.evaluar(t) for t in ts )
 
     def longitudDeArco( self, *, eps=0.01, tInicial=0, tFinal=1 ):
         if tFinal - tInicial <= eps:
@@ -223,6 +235,10 @@ class Interpolada:
             tActual += eps
 
         return indices
+
+    def reparametrizar( self, funcion ):
+        self.parametrizacion = funcion
+        return self
 
 
 
