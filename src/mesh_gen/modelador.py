@@ -239,21 +239,26 @@ class GrafoCentros:
     def grafoDeRamas( self ):
         grafo = nx.Graph()
 
-        nodoInicial = self.elegirNodoGrado(1)
-        
+        for nodo in self.nodos():
+            if self.gradoNodo( nodo ) == 1 or self.gradoNodo( nodo ) > 2:
+                grafo.add_node( nodo )
+
+        for nodo in grafo.nodes:
+            ramas = self.obtenerRamasDesdeNodo( nodo )
+            for rama in ramas:
+                if not (nodo, rama[-1]) in grafo.edges:
+                    grafo.add_edge(nodo, rama[-1], rama=rama )
+
+        return grafo
 
     def resamplear( self, alpha=0.1, beta=0.1, w=0.01 ):
-        
-        self.resamplearGrafo( alpha, beta, w )
+        grafoRamas = self.grafoDeRamas( )
+        diccionarioRamas = nx.get_edge_attributes(grafoRamas, 'rama')
+
+        for edge in grafoRamas.edges:
+            self.resamplearRama( diccionarioRamas[edge], alpha, beta, w )
+
         self.G = nx.convert_node_labels_to_integers( self.G )
-
-    def resamplearGrafo( self, alpha, beta, w ):
-        ramas = self.grafoDeRamas( )
-
-        for rama in ramas:
-            ultimoNodoNuevo = self.resamplearRama( rama, alpha, beta, w ) 
-            
-            proxNodoInicial = rama[-1]
 
     def resamplearRama( self, listaNodos, alpha, beta, w ):
         
@@ -295,7 +300,7 @@ class GrafoCentros:
         ts = np.linspace(0 + paso, 1 - paso, cantPuntos)
         parametros = minimize( costo, ts )        
 
-        return self.actualizarRama( listaNodos, curvaPosicionesInterpolada.evaluarLista(parametros.x), radiosInterpolados.evaluarLista(parametros.x) )
+        self.actualizarRama( listaNodos, curvaPosicionesInterpolada.evaluarLista(parametros.x), radiosInterpolados.evaluarLista(parametros.x) )
 
     @staticmethod
     def curvaInterpoladaConBordes( puntos, bordeIzq, bordeDer, cantPuntos ):
