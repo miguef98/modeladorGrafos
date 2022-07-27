@@ -295,7 +295,7 @@ class GrafoCentros:
             
             return CostoPrincipal( ts ) + w * CostoSecundario( ts )
         
-        cantPuntos = self.estimadorCantPuntos(termino, alpha)
+        cantPuntos = np.min( [self.estimadorCantPuntos( termino, alpha), int(curvaPosicionesInterpolada.longitudDeArco() // (0.5 * np.max(radioNodos) ))] )
         paso = 1 / cantPuntos
         ts = np.linspace(0 + paso, 1 - paso, cantPuntos)
         parametros = minimize( costo, ts )        
@@ -313,23 +313,7 @@ class GrafoCentros:
     def estimadorCantPuntos( h, alpha, grado=5 ):
         integral = integrate.quad(h, 0, 1)
         ak = integrate.newton_cotes( grado )[0]
-        return int( ((1 + alpha * (h(0) - h(1))) * np.max(ak)) / (2 * alpha * integral[0]) )
-
-    @staticmethod
-    def estimadorAlphaBeta( curvaRadios, curvaCurvaturas ):
-        '''
-            Quiero que el alpha sea mas grande cuando tengo radios mas chicos. Y mas chico cuando tengo radios mas grandes.
-            Esto es porque si tengo radios grandes, el resampleo es muy agresivo con alpha grande (osea elimino muchos puntos).
-            En cambio cuando tengo radios chicos, puedo permitirme alphas mas grandes.
-
-            En cuanto al beta, en ramas con mucha curvatura prefiero que sea mas bien grande. En ramas con poca curvatura puede ser chico.
-            Por lo que estuve testeando, betas mayores a 0.1 es ya demasiado.
-        '''
-        beta = integrate.quad( lambda t: curvaCurvaturas.evaluar(t), 0, 1 )[0] * 0.01
-
-        alpha = integrate.quad( lambda t: curvaRadios.evaluar(t), 0, 1)[0] * 0.
-
-        return 1, 1
+        return np.max( [2, int( ((1 + alpha * (h(0) - h(1))) * np.max(ak)) / (2 * alpha * integral[0]) )])
 
     def obtenerCurvas( self ):
         return self.obtenerCurvasGrafo( self.elegirNodoGrado( 1 ), None, {} )
@@ -395,13 +379,23 @@ def curvatura( puntos ):
     curvaturas = []
 
     for i in range(1, len(puntos) - 1):
-        p1 = puntos[i+1] - puntos[i]
-        p2 = puntos[i-1] - puntos[i]
+        punto = puntos[i]
+        j = i - 1
+        puntoAnterior = puntos[j]
+        while j > 0 and puntoAnterior.isClose( punto, rtol=1e-3, atol=1e-3 ):
+            j -= 1
+            puntoAnterior = puntos[j]
 
-        try: 
-            angulo = p1.angleTo( p2, p1.cross(p2).normalizar() )
-        except ValueError:
-            curvaturas.append([])
+        j = i + 1
+        puntoSiguiente = puntos[j]
+        while j < len(puntos) and puntoSiguiente.isClose( punto, rtol=1e-3, atol=1e-3 ):
+            j += 1
+            puntoSiguiente = puntos[j]
+
+        p1 = puntoSiguiente - puntos[i]
+        p2 = puntoAnterior - puntos[i]
+
+        angulo = p1.angleTo( p2, p1.cross(p2).normalizar() )
 
         curvaturas.append( 1 / (angulo / (p1.norm2() + p2.norm2())))
 

@@ -101,22 +101,12 @@ class Vec3:
         return getattr( self, coord )
 
     def argmaxCoord( self ):
-        maxCoord = self.maxCoord()
-        if np.isclose( self.x , maxCoord ):
-            return 'x'
-        elif np.isclose(self.y, maxCoord):
-            return 'y'
-        else:
-            return 'z'
+        coord = np.argmax( self.toNumpy( ))
+        return { 0: 'x', 1: 'y', 2: 'z'}[coord]
     
     def argmaxAbsCoord( self ):
-        maxCoord = self.maxCoord()
-        if np.isclose( np.abs(self.x) , maxCoord ):
-            return 'x'
-        elif np.isclose( np.abs(self.y) , maxCoord ):
-            return 'y'
-        else:
-            return 'z'
+        coord = np.argmax( np.abs(self.toNumpy() ))
+        return { 0: 'x', 1: 'y', 2: 'z'}[coord]
 
     def maxCoord( self ):
         return np.max( [ self.x, self.y, self.z ] )
@@ -138,6 +128,9 @@ class Vec3:
 
     def planoFormado( self, v1, v2 ):
         return (( v1 - self ).cross( v2 - self )).normalizar()
+
+    def isClose( self, other, rtol=1e-05, atol=1e-08 ):
+        return np.allclose(self.toNumpy(), other.toNumpy() , rtol=rtol, atol=atol)
 
     def toList( self ):
         return [ self.x, self.y, self.z ]
