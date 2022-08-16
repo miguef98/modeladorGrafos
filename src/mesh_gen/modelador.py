@@ -251,16 +251,16 @@ class GrafoCentros:
 
         return grafo
 
-    def resamplear( self, alpha=0.1, beta=0.1, w=0.01 ):
+    def resamplear( self, *, alpha=0.1, beta=0.1, w=0.01, puntosPorUnidad=0.3 ):
         grafoRamas = self.grafoDeRamas( )
         diccionarioRamas = nx.get_edge_attributes(grafoRamas, 'rama')
 
         for edge in grafoRamas.edges:
-            self.resamplearRama( diccionarioRamas[edge], alpha, beta, w )
+            self.resamplearRama( diccionarioRamas[edge], alpha, beta, w, puntosPorUnidad )
 
         self.G = nx.convert_node_labels_to_integers( self.G )
 
-    def resamplearRama( self, listaNodos, alpha, beta, w ):
+    def resamplearRama( self, listaNodos, alpha, beta, w, puntosPorUnidad ):
         
         posicionesNodos = [ self.posicionNodo( nodo ) for nodo in listaNodos ]
         curvaPosicionesInterpolada = Interpolada(  posicionesNodos ).reparametrizar( lambda x : np.clip(x, 0, 1))
@@ -268,8 +268,7 @@ class GrafoCentros:
         radioNodos = [ self.radioNodo( nodo ) for nodo in listaNodos ]
         radiosInterpolados = Interpolada( radioNodos ).reparametrizar( lambda x : np.clip(x, 0, 1))
         
-        curvaturaNodos = curvatura( posicionesNodos )
-        curvaturaInterpolada = Interpolada( curvaturaNodos  ).reparametrizar( lambda x : np.clip(x, 0, 1))
+        curvaturaInterpolada = curvaPosicionesInterpolada.curvatura().reparametrizar( lambda x : np.clip(x, 0, 1))
 
         termino = lambda j : radiosInterpolados[j] / (1 + beta * curvaturaInterpolada[j])
         
@@ -290,12 +289,12 @@ class GrafoCentros:
                 return np.sum( 
                     [ g( xs[0], alpha * (termino(0) + termino(xs[0])) )]+
                     [ g( xs[i+1] - xs[i], alpha* (termino(xs[i]) + termino(xs[i+1])) ) for i in range(0, len(xs)-1)] +
-                    [ g( 1 - xs[-1], alpha*(termino(xs[1]) + termino(1) ) )] )
+                    [ g( 1 - xs[-1], alpha*(termino(xs[-1]) + termino(1) ) )] )
 
             
             return CostoPrincipal( ts ) + w * CostoSecundario( ts )
         
-        cantPuntos = np.min( [self.estimadorCantPuntos( termino, alpha), int(curvaPosicionesInterpolada.longitudDeArco() // (0.5 * np.max(radioNodos) ))] )
+        cantPuntos = self.estimadorCantPuntos( curvaPosicionesInterpolada, puntosPorUnidad )
         paso = 1 / cantPuntos
         ts = np.linspace(0 + paso, 1 - paso, cantPuntos)
         parametros = minimize( costo, ts )        
@@ -310,56 +309,14 @@ class GrafoCentros:
         return Interpolada( radioNodos ).reparametrizar( lambda x : (ultimoIndice - primerIndice) * x + primerIndice ), ( -primerIndice / (ultimoIndice - primerIndice) + 0.01, (1-primerIndice) / (ultimoIndice - primerIndice) - 0.01)
     
     @staticmethod
-    def estimadorCantPuntos( h, alpha, grado=5 ):
+    def estimadorCantPuntosViejo( h, alpha, grado=5 ):
         integral = integrate.quad(h, 0, 1)
         ak = integrate.newton_cotes( grado )[0]
-        return np.max( [2, int( ((1 + alpha * (h(0) - h(1))) * np.max(ak)) / (2 * alpha * integral[0]) )])
+        return np.max( [1, int( ((1 + alpha * (h(0) - h(1))) * np.max(ak)) / (2 * alpha * integral[0]) )])
 
-    def obtenerCurvas( self ):
-        return self.obtenerCurvasGrafo( self.elegirNodoGrado( 1 ), None, {} )
-
-    def obtenerCurvasGrafo( self, nodoInicial, nodoProcedente, nodosJointVisitados ):
-        ramas = self.obtenerRamasDesdeNodo( nodoInicial, nodoProcedente )
-    
-        curvasPosiciones = []
-        curvasRadios = []
-        curvasCurvaturas = []
-
-        for rama in ramas:
-            radioNodos = [ self.radioNodo( nodo ) for nodo in rama ]
-            bordeIzq = np.linspace( np.power(10, 1), radioNodos[0], len(rama) )
-            bordeDer = np.linspace( radioNodos[-1], np.power(10, 1), len(rama) )
-
-            radiosInterpolados, limitesRadios = self.curvaInterpoladaConBordes( radioNodos, bordeIzq, bordeDer, len(rama) )
-
-            posicionesNodos = [ self.posicionNodo( nodo ) for nodo in rama ]
-            curvaturaNodos = curvatura( posicionesNodos )
-            bordeIzq = list(reversed( np.exp(np.linspace(0, -10, len(rama)) * 1)* curvaturaNodos[0] + 0.5 ) )
-            bordeDer = np.exp( np.linspace(0, -10, len(rama)) * 1 ) * curvaturaNodos[-1] + 0.5
-            curvaturaInterpolada, limitesCurvatura = self.curvaInterpoladaConBordes( curvaturaNodos, bordeIzq, bordeDer, len(rama) )
-            
-            posicionesNodos = [ self.posicionNodo( nodo ) for nodo in rama ]
-            curvaPosicionesInterpolada = Interpolada(  [posicionesNodos[0]] + posicionesNodos + [posicionesNodos[-1]] )
-            
-            curvasPosiciones.append(curvaPosicionesInterpolada)
-            curvasRadios.append(radiosInterpolados)
-            curvasCurvaturas.append(curvaturaInterpolada)
-            
-
-            ultimoNodoNuevo = rama[-2]
-            
-            proxNodoInicial = rama[-1]
-
-            if not proxNodoInicial in nodosJointVisitados and self.gradoNodo(proxNodoInicial) != 1:
-                nodosJointVisitados[proxNodoInicial] = True
-                cp, cr, cc = self.obtenerCurvasGrafo( proxNodoInicial, ultimoNodoNuevo, nodosJointVisitados )
-
-                curvasPosiciones += cp
-                curvasRadios += cr
-                curvasCurvaturas += cc
-
-        return curvasPosiciones, curvasRadios, curvasCurvaturas
-
+    @staticmethod
+    def estimadorCantPuntos( curva, puntosPorUnidad ):
+        return np.max( [1, int(curva.longitudDeArco() * puntosPorUnidad ) ] )
 
     def actualizarRama( self, nodosARemplazar, nuevasPosiciones, nuevosRadios ):
         [ self.eliminarNodo( nodo ) for nodo in nodosARemplazar[1:-1] ] # elimino los nodos menos los de las puntas
@@ -373,30 +330,3 @@ class GrafoCentros:
         self.crearArista( ultimoNodo, nodosARemplazar[-1] )
 
         return ultimoNodo
-
-
-def curvatura( puntos ):
-    curvaturas = []
-
-    for i in range(1, len(puntos) - 1):
-        punto = puntos[i]
-        j = i - 1
-        puntoAnterior = puntos[j]
-        while j > 0 and puntoAnterior.isClose( punto, rtol=1e-3, atol=1e-3 ):
-            j -= 1
-            puntoAnterior = puntos[j]
-
-        j = i + 1
-        puntoSiguiente = puntos[j]
-        while j < len(puntos) and puntoSiguiente.isClose( punto, rtol=1e-3, atol=1e-3 ):
-            j += 1
-            puntoSiguiente = puntos[j]
-
-        p1 = puntoSiguiente - puntos[i]
-        p2 = puntoAnterior - puntos[i]
-
-        angulo = p1.angleTo( p2, p1.cross(p2).normalizar() )
-
-        curvaturas.append( 1 / (angulo / (p1.norm2() + p2.norm2())))
-
-    return [0] + curvaturas + [0]

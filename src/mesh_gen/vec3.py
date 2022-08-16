@@ -23,6 +23,9 @@ class Vec3:
     
     def __truediv__( self, other ):
         return self * (1 / other)
+
+    def __len__( self ):
+        return 3
             
     def dot( self, other ):
         return self.x * other.x + self.y * other.y + self.z * other.z 
@@ -150,6 +153,10 @@ class Vec3:
         # devuelve vector normalizado random
         return Vec3( *np.random.uniform(-1, 1, 3) ).normalizar()
 
+    @classmethod
+    def fromList( cls, lista ):
+        return [ cls(*i) for i in lista ]
+
 
 class Interpolada:
     def __init__( self, puntos ):
@@ -158,6 +165,11 @@ class Interpolada:
         
         self.puntos = [puntos[0]] + puntos + [puntos[-1]]
         self.parametrizacion = lambda x : x
+
+        try:
+            self.dimension = len(puntos[0])
+        except:
+            self.dimension = 1
         
     def __getitem__(self, t):
         return self.evaluar(t)
@@ -233,6 +245,28 @@ class Interpolada:
         self.parametrizacion = funcion
         return self
 
+    def gradiente( self, t0=0, t1=1, eps=0.001, normalizado=False ):
+        muestras = np.array( [ muestra.toNumpy() for muestra in self.evaluarLista( np.arange(t0, t1, eps ))])
+        ds = np.array([ np.gradient( muestras.T[i], eps ) for i in range(self.dimension) ])
+
+        if self.dimension == 3:
+            if normalizado:
+                return Interpolada( Vec3.fromList( ds.T ) ), Interpolada( list( map( lambda x : x.normalizar(),  Vec3.fromList( ds.T ) )) )
+            else:
+                return Interpolada( Vec3.fromList( ds.T ) )
+        else:
+            return Interpolada( ds.T )
+
+    def curvatura( self ):
+        '''
+            k = norm( dT / ds ) = norm( dT / dt ) / norm( dC / dt )
+        '''
+
+        dC_dt, Tp = self.gradiente(normalizado=True)
+        dTp_dt = Tp.gradiente()
+
+        return Interpolada( [ dTp_dt[t].norm2() / dC_dt[t].norm2() for t in np.linspace(0, 1, 100)] )
+    
 
 
 
